@@ -1,0 +1,540 @@
+# %% [markdown]
+# # 🖼️ Image Processor - Processamento de Imagens em Python
+# 
+# Um pacote completo para processamento de imagens com filtros, transformações e utilitários.
+# 
+
+# %% [markdown]
+# ## 📦 Instalação de Dependências
+
+# %%
+!pip install Pillow opencv-python numpy
+
+# %% [markdown]
+# ## 🗂️ Estrutura do Pacote
+
+# %%
+import os
+import tempfile
+import json
+from pathlib import Path
+from typing import Union, List, Dict, Any, Tuple
+from abc import ABC, abstractmethod
+from datetime import datetime
+from PIL import Image, ImageFilter, ImageEnhance, UnidentifiedImageError
+import numpy as np
+
+# %% [markdown]
+# ## 🚨 Exceções Personalizadas
+
+# %%
+class ImageProcessorError(Exception):
+    """Base exception for image processor errors"""
+    pass
+
+class ImageNotFoundError(ImageProcessorError):
+    """Raised when image file is not found"""
+    pass
+
+class InvalidImageError(ImageProcessorError):
+    """Raised when image file is invalid or corrupted"""
+    pass
+
+class UnsupportedFormatError(ImageProcessorError):
+    """Raised when image format is not supported"""
+    pass
+
+class FilterError(ImageProcessorError):
+    """Raised when filter operation fails"""
+    pass
+
+# %% [markdown]
+# ## 🛠️ Utilitários
+
+# %%
+def validate_image_path(image_path: Union[str, Path]) -> None:
+    """
+    Validate if the image path exists and is a valid image file
+    """
+    if not os.path.exists(image_path):
+        raise ImageNotFoundError(f"Image file not found: {image_path}")
+    
+    if not os.path.isfile(image_path):
+        raise InvalidImageError(f"Path is not a file: {image_path}")
+    
+    try:
+        with Image.open(image_path) as img:
+            img.verify()
+    except (UnidentifiedImageError, IOError):
+        raise InvalidImageError(f"Invalid or corrupted image file: {image_path}")
+
+def get_image_info(image_path: Union[str, Path]) -> Dict[str, Any]:
+    """
+    Get information about an image file
+    """
+    validate_image_path(image_path)
+    
+    with Image.open(image_path) as img:
+        return {
+            "format": img.format,
+            "mode": img.mode,
+            "size": img.size,
+            "width": img.width,
+            "height": img.height,
+            "channels": len(img.getbands())
+        }
+
+def convert_format(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    output_format: str = "JPEG",
+    quality: int = 95
+) -> str:
+    """
+    Convert image to different format
+    """
+    validate_image_path(input_path)
+    
+    supported_formats = ["JPEG", "PNG", "BMP", "GIF", "TIFF", "WEBP"]
+    if output_format.upper() not in supported_formats:
+        raise UnsupportedFormatError(f"Unsupported format: {output_format}")
+    
+    try:
+        with Image.open(input_path) as img:
+            if output_format.upper() == "JPEG" and img.mode in ("RGBA", "LA"):
+                img = img.convert("RGB")
+            
+            img.save(output_path, format=output_format, quality=quality)
+            return str(output_path)
+    except Exception as e:
+        raise InvalidImageError(f"Failed to convert image: {e}")
+
+# %% [markdown]
+# ## 🎨 Filtros de Imagem
+
+# %%
+def convert_to_grayscale(input_path: Union[str, Path], output_path: Union[str, Path]) -> str:
+    """
+    Convert image to grayscale
+    """
+    validate_image_path(input_path)
+    
+    try:
+        with Image.open(input_path) as img:
+            grayscale_img = img.convert("L")
+            grayscale_img.save(output_path)
+            return str(output_path)
+    except Exception as e:
+        raise FilterError(f"Failed to convert to grayscale: {e}")
+
+def apply_filter(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    filter_type: str = "blur",
+    **kwargs
+) -> str:
+    """
+    Apply various filters to an image
+    """
+    validate_image_path(input_path)
+    
+    filter_map = {
+        "blur": lambda img: img.filter(ImageFilter.BLUR),
+        "contour": lambda img: img.filter(ImageFilter.CONTOUR),
+        "detail": lambda img: img.filter(ImageFilter.DETAIL),
+        "edge_enhance": lambda img: img.filter(ImageFilter.EDGE_ENHANCE),
+        "emboss": lambda img: img.filter(ImageFilter.EMBOSS),
+        "find_edges": lambda img: img.filter(ImageFilter.FIND_EDGES),
+        "sharpen": lambda img: img.filter(ImageFilter.SHARPEN),
+        "smooth": lambda img: img.filter(ImageFilter.SMOOTH),
+    }
+    
+    # Adicionar blur gaussiano se disponível
+    if hasattr(ImageFilter, 'GaussianBlur'):
+        filter_map["gaussian_blur"] = lambda img: img.filter(
+            ImageFilter.GaussianBlur(kwargs.get('radius', 2))
+        )
+    
+    if filter_type not in filter_map:
+        raise FilterError(f"Unsupported filter type: {filter_type}")
+    
+    try:
+        with Image.open(input_path) as img:
+            filtered_img = filter_map[filter_type](img)
+            filtered_img.save(output_path)
+            return str(output_path)
+    except Exception as e:
+        raise FilterError(f"Failed to apply filter '{filter_type}': {e}")
+
+def detect_edges(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    threshold: int = 100
+) -> str:
+    """
+    Detect edges in an image using Canny edge detection
+    """
+    validate_image_path(input_path)
+    
+    try:
+        import cv2
+        
+        # Read image
+        img = cv2.imread(str(input_path), cv2.IMREAD_GRAYSCALE)
+        
+        # Apply Canny edge detection
+        edges = cv2.Canny(img, threshold, threshold * 2)
+        
+        # Save result
+        cv2.imwrite(str(output_path), edges)
+        return str(output_path)
+        
+    except ImportError:
+        raise FilterError("OpenCV is required for edge detection")
+    except Exception as e:
+        raise FilterError(f"Failed to detect edges: {e}")
+
+def adjust_brightness(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    factor: float = 1.0
+) -> str:
+    """
+    Adjust image brightness
+    """
+    validate_image_path(input_path)
+    
+    try:
+        with Image.open(input_path) as img:
+            enhancer = ImageEnhance.Brightness(img)
+            adjusted_img = enhancer.enhance(factor)
+            adjusted_img.save(output_path)
+            return str(output_path)
+    except Exception as e:
+        raise FilterError(f"Failed to adjust brightness: {e}")
+
+def adjust_contrast(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    factor: float = 1.0
+) -> str:
+    """
+    Adjust image contrast
+    """
+    validate_image_path(input_path)
+    
+    try:
+        with Image.open(input_path) as img:
+            enhancer = ImageEnhance.Contrast(img)
+            adjusted_img = enhancer.enhance(factor)
+            adjusted_img.save(output_path)
+            return str(output_path)
+    except Exception as e:
+        raise FilterError(f"Failed to adjust contrast: {e}")
+
+# %% [markdown]
+# ## 🔄 Transformações de Imagem
+
+# %%
+def resize_image(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    width: int,
+    height: int,
+    resample: int = Image.LANCZOS
+) -> str:
+    """
+    Resize image to specified dimensions
+    """
+    validate_image_path(input_path)
+    
+    if width <= 0 or height <= 0:
+        raise ValueError("Width and height must be positive integers")
+    
+    try:
+        with Image.open(input_path) as img:
+            resized_img = img.resize((width, height), resample)
+            resized_img.save(output_path)
+            return str(output_path)
+    except Exception as e:
+        raise FilterError(f"Failed to resize image: {e}")
+
+def rotate_image(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    angle: float,
+    expand: bool = True
+) -> str:
+    """
+    Rotate image by specified angle
+    """
+    validate_image_path(input_path)
+    
+    try:
+        with Image.open(input_path) as img:
+            rotated_img = img.rotate(angle, expand=expand)
+            rotated_img.save(output_path)
+            return str(output_path)
+    except Exception as e:
+        raise FilterError(f"Failed to rotate image: {e}")
+
+def flip_image(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    flip_direction: str = "horizontal"
+) -> str:
+    """
+    Flip image horizontally or vertically
+    """
+    validate_image_path(input_path)
+    
+    flip_methods = {
+        "horizontal": Image.FLIP_LEFT_RIGHT,
+        "vertical": Image.FLIP_TOP_BOTTOM
+    }
+    
+    if flip_direction not in flip_methods:
+        raise ValueError("Flip direction must be 'horizontal' or 'vertical'")
+    
+    try:
+        with Image.open(input_path) as img:
+            flipped_img = img.transpose(flip_methods[flip_direction])
+            flipped_img.save(output_path)
+            return str(output_path)
+    except Exception as e:
+        raise FilterError(f"Failed to flip image: {e}")
+
+def crop_image(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    left: int,
+    top: int,
+    right: int,
+    bottom: int
+) -> str:
+    """
+    Crop image to specified coordinates
+    """
+    validate_image_path(input_path)
+    
+    if left >= right or top >= bottom:
+        raise ValueError("Invalid crop coordinates")
+    
+    try:
+        with Image.open(input_path) as img:
+            # Validate coordinates are within image bounds
+            if (right > img.width or bottom > img.height or 
+                left < 0 or top < 0):
+                raise ValueError("Crop coordinates are outside image bounds")
+            
+            cropped_img = img.crop((left, top, right, bottom))
+            cropped_img.save(output_path)
+            return str(output_path)
+    except Exception as e:
+        raise FilterError(f"Failed to crop image: {e}")
+
+# %% [markdown]
+# ## 🧪 Funções de Teste
+
+# %%
+def create_test_image(width=100, height=100, color='red', format='JPEG'):
+    """Create a test image and return its path"""
+    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+        img = Image.new('RGB', (width, height), color=color)
+        img.save(tmp.name, format=format)
+        return tmp.name
+
+def test_all_functions():
+    """Test all image processing functions"""
+    print("🧪 Testando todas as funções do Image Processor...")
+    
+    # Criar imagem de teste
+    test_image = create_test_image()
+    print(f"📁 Imagem de teste criada: {test_image}")
+    
+    try:
+        # Testar utilitários
+        print("\n🔧 Testando utilitários...")
+        info = get_image_info(test_image)
+        print(f"✅ Informações da imagem: {info['width']}x{info['height']} {info['format']}")
+        
+        # Testar filtros
+        print("\n🎨 Testando filtros...")
+        
+        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+            output_path = tmp.name
+        
+        # Testar grayscale
+        gray_path = convert_to_grayscale(test_image, output_path.replace('.jpg', '_gray.jpg'))
+        print(f"✅ Escala de cinza: {gray_path}")
+        
+        # Testar blur
+        blur_path = apply_filter(test_image, output_path.replace('.jpg', '_blur.jpg'), "blur")
+        print(f"✅ Filtro blur: {blur_path}")
+        
+        # Testar brilho
+        bright_path = adjust_brightness(test_image, output_path.replace('.jpg', '_bright.jpg'), 1.5)
+        print(f"✅ Ajuste de brilho: {bright_path}")
+        
+        # Testar transformações
+        print("\n🔄 Testando transformações...")
+        
+        # Redimensionar
+        resize_path = resize_image(test_image, output_path.replace('.jpg', '_resize.jpg'), 50, 50)
+        print(f"✅ Redimensionamento: {resize_path}")
+        
+        # Rotacionar
+        rotate_path = rotate_image(test_image, output_path.replace('.jpg', '_rotate.jpg'), 45)
+        print(f"✅ Rotação: {rotate_path}")
+        
+        # Flip
+        flip_path = flip_image(test_image, output_path.replace('.jpg', '_flip.jpg'), "horizontal")
+        print(f"✅ Flip horizontal: {flip_path}")
+        
+        # Crop
+        crop_path = crop_image(test_image, output_path.replace('.jpg', '_crop.jpg'), 10, 10, 90, 90)
+        print(f"✅ Crop: {crop_path}")
+        
+        # Testar edge detection (se OpenCV estiver disponível)
+        print("\n🔍 Testando detecção de bordas...")
+        try:
+            edge_path = detect_edges(test_image, output_path.replace('.jpg', '_edges.jpg'))
+            print(f"✅ Detecção de bordas: {edge_path}")
+        except FilterError as e:
+            print(f"⚠️  Detecção de bordas não disponível: {e}")
+        
+        print("\n🎉 Todos os testes concluídos com sucesso!")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Erro durante os testes: {e}")
+        return False
+        
+    finally:
+        # Cleanup
+        try:
+            os.unlink(test_image)
+            # Remover arquivos temporários de output
+            for f in Path('.').glob('*_gray.jpg'):
+                f.unlink()
+            for f in Path('.').glob('*_blur.jpg'):
+                f.unlink()
+            for f in Path('.').glob('*_bright.jpg'):
+                f.unlink()
+            for f in Path('.').glob('*_resize.jpg'):
+                f.unlink()
+            for f in Path('.').glob('*_rotate.jpg'):
+                f.unlink()
+            for f in Path('.').glob('*_flip.jpg'):
+                f.unlink()
+            for f in Path('.').glob('*_crop.jpg'):
+                f.unlink()
+            for f in Path('.').glob('*_edges.jpg'):
+                f.unlink()
+        except:
+            pass
+
+# %% [markdown]
+# ## 🚀 Exemplo de Uso
+
+# %%
+def demo_image_processing():
+    """Demonstração completa do processamento de imagem"""
+    print("🌟 Demonstração do Image Processor")
+    print("=" * 50)
+    
+    # Criar uma imagem de teste colorida
+    test_image = create_test_image(200, 200, 'blue')
+    print(f"📸 Imagem de teste criada: {test_image}")
+    
+    # Mostrar informações da imagem
+    info = get_image_info(test_image)
+    print(f"\n📊 Informações da imagem:")
+    print(f"   Tamanho: {info['width']}x{info['height']}")
+    print(f"   Formato: {info['format']}")
+    print(f"   Modo: {info['mode']}")
+    print(f"   Canais: {info['channels']}")
+    
+    # Aplicar diferentes operações
+    operations = [
+        ("Escala de Cinza", convert_to_grayscale, {}),
+        ("Blur", apply_filter, {"filter_type": "blur"}),
+        ("Brilho +50%", adjust_brightness, {"factor": 1.5}),
+        ("Contraste +50%", adjust_contrast, {"factor": 1.5}),
+        ("Redimensionar", resize_image, {"width": 100, "height": 100}),
+        ("Rotacionar 30°", rotate_image, {"angle": 30}),
+    ]
+    
+    print(f"\n🛠️  Aplicando operações:")
+    for op_name, op_func, kwargs in operations:
+        try:
+            output_path = f"resultado_{op_name.lower().replace(' ', '_')}.jpg"
+            result = op_func(test_image, output_path, **kwargs)
+            print(f"   ✅ {op_name}: {result}")
+        except Exception as e:
+            print(f"   ❌ {op_name}: Erro - {e}")
+    
+    # Tentar detecção de bordas
+    try:
+        edge_path = "resultado_bordas.jpg"
+        result = detect_edges(test_image, edge_path)
+        print(f"   ✅ Detecção de Bordas: {result}")
+    except Exception as e:
+        print(f"   ⚠️  Detecção de Bordas: Não disponível - {e}")
+    
+    # Cleanup
+    try:
+        os.unlink(test_image)
+        print(f"\n🧹 Imagem temporária removida")
+    except:
+        pass
+    
+    print(f"\n🎉 Demonstração concluída!")
+    print(f"📁 Resultados salvos nos arquivos 'resultado_*.jpg'")
+
+# %% [markdown]
+# ## 🧪 Executar Testes
+
+# %%
+# Executar testes
+if __name__ == "__main__":
+    print("🔬 Iniciando testes do Image Processor...")
+    success = test_all_functions()
+    
+    if success:
+        print("\n✅ Todos os testes passaram!")
+        print("\n🎬 Iniciando demonstração...")
+        demo_image_processing()
+    else:
+        print("\n❌ Alguns testes falharam!")
+        
+    print("\n" + "="*50)
+    print("🎯 Image Processor pronto para uso!")
+    print("💡 Use as funções diretamente no seu código:")
+    print("   from image_processor import convert_to_grayscale, resize_image, etc.")
+
+# %%
+# Executar a demonstração automaticamente
+demo_image_processing()
+
+# %% [markdown]
+# ## 📋 Funções Disponíveis
+# 
+# ### 🎨 Filtros
+# - `convert_to_grayscale()` - Converter para escala de cinza
+# - `apply_filter()` - Aplicar diversos filtros (blur, sharpen, etc.)
+# - `detect_edges()` - Detecção de bordas com OpenCV
+# - `adjust_brightness()` - Ajustar brilho
+# - `adjust_contrast()` - Ajustar contraste
+# 
+# ### 🔄 Transformações
+# - `resize_image()` - Redimensionar imagem
+# - `rotate_image()` - Rotacionar imagem
+# - `flip_image()` - Espelhar imagem
+# - `crop_image()` - Recortar imagem
+# 
+# ### 🛠️ Utilitários
+# - `validate_image_path()` - Validar arquivo de imagem
+# - `get_image_info()` - Obter informações da imagem
+# - `convert_format()` - Converter formato da imagem
