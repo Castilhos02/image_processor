@@ -202,3 +202,5 @@ Distribuído sob licença MIT. Veja o arquivo LICENSE para mais informações.
 
 ## 👨‍💻 Autor
 Douglas Castilho — @Castilhos02
+Aluno de TI na UNIVESP
+Perfil DIO (https://www.dio.me/users/dcastilhosdrive)
